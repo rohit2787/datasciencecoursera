@@ -1,0 +1,114 @@
+---
+title: "Predicting the manner in which an individual does an exercise"
+author: "Rohit"
+date: "April 16, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+## Loading the data
+
+The data was downloaded directly from the source and saved as training and testing data frames. The testing data frame was kept aside for applying the trained model prediction. The training dataset was investigated further to identify the relevant predictors and removing irrelvant data or fields with missing information.
+```{r echo=FALSE, results='hide'}
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(caret)
+library(parallel)
+library(doParallel)
+library(e1071)
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","train.csv")
+training<-read.csv("train.csv")
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","test.csv")
+testing<-read.csv("test.csv")
+set.seed(25)
+```
+
+#Exploratory Analysis
+
+After loading the training dataset, the information contained was summarized using the summary function in R. The output provided relevant information regarding which predictors such as missing information, NAs and class. 
+
+The plot shown below identifes the number of predictors that contain NAs:
+
+```{r echo=FALSE, results='hide'}
+NA_find<-function(x)
+{
+  a<-vector()
+  for(i in 1:ncol(x))
+  {
+    a[i]<-sum(is.na(x[,i]))
+  }
+  return(a)
+}
+```
+```{r echo=FALSE, results=TRUE}
+NA_obs<-data.frame(nam=names(training),NAs=NA_find(training),NA_num=c(1:160))
+qplot(NA_obs$NAs)
+```
+
+In the next step, the predictors having near zero variability are identified and removed from the data set. Several predictors with near zero variability are also those with NAs. 
+
+```{r echo=FALSE,results=TRUE}
+nearzero<-nearZeroVar(training,saveMetrics = TRUE,names=TRUE)
+nearzero[nearzero$nzv==TRUE,]
+```
+
+##Model Creation
+After removing the irrelevant predictors, the new training data set is split into two parts: (1) a data frame of the predictors; and (2) a data frame comprising of the output variable. Rando Forest was used to train the data. The train function in caret package was used to model the data. To speed up the processing, additional clusters were allocated using the functions in parallel and doParallel packages. The inbuilt train control function was used to create 10-folds in the dataset. This was directly included as an argument in the train function. 
+
+```{r echo=FALSE, results='hide'}
+#Removing unnecessary predictors
+Process<-function(x)
+{
+nearzero<-nearZeroVar(x)
+x<-x[,-nearzero]
+x<-as.data.frame(t(na.omit(t(x))))
+x<-select(x,-user_name,-raw_timestamp_part_1,-raw_timestamp_part_2,-cvtd_timestamp,-num_window,-X)
+}
+fun<-function(x)
+{
+  x<-as.numeric(paste0(x))
+}
+
+training<-Process(training)
+x<-training[,-53]
+x<-sapply(x,fun)
+y<-data.frame(classe=training[,53])
+
+model<-function(x,y,method)
+{
+  cluster <- makeCluster(detectCores() - 1)
+  registerDoParallel(cluster)
+  fitControl <- trainControl(method = "cv",number = 10,allowParallel = TRUE)
+  if(method=="rf")
+  {
+    mod<-train(x=x,y=y$classe,data=training,method="rf",trnControl=fitControl)
+  }
+  if(method=="rf")
+  {
+    mod<-train(x=x,y=y$classe,data=training,method="rf",trnControl=fitControl)
+  }
+  stopCluster(cluster)
+  registerDoSEQ()
+  return(mod)
+}
+
+model_1<-model(x,y,"rf")
+```
+
+##Results
+Using the model along with the 10-fold crossvalidation approach, the results indicate a out of sample error of 0.43%
+
+```{r echo=FALSE, results=TRUE}
+model_1$resample
+confusionMatrix.train(model_1)
+```
+
+The model was then used to predict the outcome using the testing dataset. A similar preprocessing was also performed on the testing dataset i.e., removing predictors with NAs, near zero variance and that are irrelevant.   
+
+```{r echo=FALSE, results=TRUE}
+testing<-Process(testing)
+x_test<-testing[,-53]
+x_test<-as.data.frame(sapply(x_test,fun))
+pred<-predict(model_1,newdata=x_test)
+```
